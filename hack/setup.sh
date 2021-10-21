@@ -24,12 +24,21 @@ readonly REGISTRY_PORT=${REGISTRY_PORT:-5000}
 readonly REGISTRY=${REGISTRY:-"${HOST_ADDR}:${REGISTRY_PORT}"}
 readonly KIND_IMAGE=${KIND_IMAGE:-kindest/node:v1.21.1}
 readonly RELEASE_VERSION=${RELEASE_VERSION:-""}
-readonly GIT_WRITER_SSH_USER=${GIT_WRITER_SSH_USER:-"git"}
-readonly GIT_WRITER_SERVER=${GIT_WRITER_SERVER:-"github.com"}
-readonly GIT_WRITER_PROJECT=${GIT_WRITER_PROJECT:-"waciumawanjohi"}
+readonly GIT_WRITER_SSH_USER=${GIT_WRITER_SSH_USER:-"ssh://git"}
+readonly GIT_WRITER_SERVER=${GIT_WRITER_SERVER:-"localhost"}
+readonly GIT_WRITER_SERVER_PORT=${GIT_WRITER_SERVER_PORT:-"2222"}
+readonly GIT_WRITER_USERNAME=${GIT_WRITER_USERNAME:-"example"}
+readonly GIT_WRITER_SSH_USER_EMAIL=${GIT_WRITER_SSH_USER_EMAIL:-"example@example.com"}
+readonly GIT_WRITER_PROJECT=${GIT_WRITER_PROJECT:-"example"}
 readonly GIT_WRITER_REPOSITORY=${GIT_WRITER_REPOSITORY:-"test-tekton-git-cli"}
-readonly GIT_WRITER_SSH_TOKEN=${GIT_WRITER_SSH_TOKEN:-"$(lpass show --notes waciumawanjohi-test-tekton-git-cli-ssh-key)"}
-readonly GIT_WRITER_SERVER_PUBLIC_TOKEN=${GIT_WRITER_SERVER_PUBLIC_TOKEN:-"$(ssh-keyscan -H "$GIT_WRITER_SERVER")"}
+
+if [[ -z "$(which ssh)" ]]; then
+      apt-get -yq update && apt-get -yq install openssh-client
+fi
+
+if [[ -n "$GIT_WRITER_SERVER_PORT" ]]; then
+      readonly PORT_FLAG="-p $GIT_WRITER_SERVER_PORT"
+fi
 
 # shellcheck disable=SC2034  # This _should_ be marked as an extern but I clearly don't understand how it operates in github actions
 readonly DOCKER_CONFIG="/tmp/cartographer-docker"
@@ -52,12 +61,12 @@ main() {
         for command in "$@"; do
                 case $command in
                 cluster)
-                        start_registry
-#                        start_repository
-                        start_local_cluster
-                        install_cert_manager
-                        install_kapp_controller
-                        install_secretgen_controller
+#                        start_registry
+                        start_repository
+#                        start_local_cluster
+#                        install_cert_manager
+#                        install_kapp_controller
+#                        install_secretgen_controller
                         ;;
 
                 cartographer)
@@ -86,7 +95,7 @@ main() {
 
                 teardown)
                         delete_containers
-#                        delete_generated_repository_keys
+                        delete_generated_repository_keys
                         ;;
 
                 *)
@@ -187,11 +196,11 @@ start_repository() {
         DOCKER_EXEC_SUCCESS=false
         until $DOCKER_EXEC_SUCCESS
         do
-          GITEA_TOKEN="$(docker exec -u git "$CONTAINER_ID" gitea admin user create --username hi --password hi --email hi@example.com --admin --access-token --must-change-password=false | head -1 | rev | cut -d ' ' -f1 | rev)" && DOCKER_EXEC_SUCCESS=true || echo "attempting docker exec again" && sleep 5
+          GITEA_TOKEN="$(docker exec -u git "$CONTAINER_ID" gitea admin user create --username "$GIT_WRITER_USERNAME" --password hi --email "$GIT_WRITER_SSH_USER_EMAIL" --admin --access-token --must-change-password=false | head -1 | rev | cut -d ' ' -f1 | rev)" && DOCKER_EXEC_SUCCESS=true || echo "attempting docker exec again" && sleep 5
         done
 
         # Generate public/private key
-        ssh-keygen -t rsa -b 4096 -C "hi@example.com" -f hack/gitea-key -P ""
+        ssh-keygen -t rsa -b 4096 -C "$GIT_WRITER_SSH_USER_EMAIL" -f hack/gitea-key -P ""
         GITEA_KEY_PUB="$(cat hack/gitea-key.pub)"
 
         # Add the public key to the user on the server
@@ -199,7 +208,7 @@ start_repository() {
         until $CURL_SUCCEED
         do
           curl -X 'POST' \
-            'http://localhost:3000/api/v1/admin/users/hi/keys' \
+            "http://localhost:3000/api/v1/admin/users/$GIT_WRITER_USERNAME/keys" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \
             -H "Authorization: token $GITEA_TOKEN" \
@@ -208,7 +217,32 @@ start_repository() {
         done
 
         # Create a repo on the server
-        curl -X 'POST'   'http://localhost:3000/api/v1/user/repos'   -H 'accept: application/json'   -H 'Content-Type: application/json'   -d '{"name": "my-repo", "private": false}' -H "Authorization: token $GITEA_TOKEN"
+        curl -X 'POST'   'http://localhost:3000/api/v1/user/repos'   -H 'accept: application/json'   -H 'Content-Type: application/json'   -d '{"name": "'"$GIT_WRITER_REPOSITORY"'", "private": false}' -H "Authorization: token $GITEA_TOKEN"
+
+        GIT_WRITER_SSH_TOKEN=${GIT_WRITER_SSH_TOKEN:-"$(cat hack/gitea-key)"}
+        GIT_WRITER_SERVER_PUBLIC_TOKEN=${GIT_WRITER_SERVER_PUBLIC_TOKEN:-"$(ssh-keyscan -H "$PORT_FLAG" "$GIT_WRITER_SERVER")"}
+        echo "$GIT_WRITER_SERVER_PUBLIC_TOKEN" > hack/gitea-server-public-key
+
+        add_ssh_token
+
+        pushd "$(mktemp -d)"
+                touch README.md
+                git init
+
+                git add README.md
+                git commit -m "first commit"
+                git remote add origin "$GIT_WRITER_SSH_USER@$GIT_WRITER_SERVER:$GIT_WRITER_SERVER_PORT/$GIT_WRITER_PROJECT/$GIT_WRITER_REPOSITORY.git"
+                git push -u origin master
+        popd
+}
+
+add_ssh_token() {
+  ssh-add -t 1000 - <<< "$GIT_WRITER_SSH_TOKEN" 2> /dev/null || {
+        mkdir -p ~/.ssh
+        echo "$GIT_WRITER_SSH_TOKEN" >> ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+  }
+  echo "$GIT_WRITER_SERVER_PUBLIC_TOKEN" >> ~/.ssh/known_hosts
 }
 
 start_local_cluster() {
@@ -310,6 +344,9 @@ setup_source_to_gitops() {
         touch hack/git_entropy
         echo $RANDOM | base64 > hack/git_entropy
 
+        GIT_WRITER_SSH_TOKEN=${GIT_WRITER_SSH_TOKEN:-"$(cat hack/gitea-key)"}
+        GIT_WRITER_SERVER_PUBLIC_TOKEN=${GIT_WRITER_SERVER_PUBLIC_TOKEN:-"$(cat hack/gitea-server-public-key)"}
+
         ytt --ignore-unknown-comments \
                 -f "$DIR/../examples/source-to-gitops" \
                 --data-value registry.server="$REGISTRY" \
@@ -318,10 +355,13 @@ setup_source_to_gitops() {
                 --data-value image_prefix="$REGISTRY/example-" \
                 --data-value git_writer.message="Some peturbation: $(cat hack/git_entropy)" \
                 --data-value git_writer.ssh_user="$GIT_WRITER_SSH_USER" \
+                --data-value git_writer.username="$GIT_WRITER_USERNAME" \
+                --data-value git_writer.user_email="$GIT_WRITER_SSH_USER_EMAIL" \
                 --data-value git_writer.server="$GIT_WRITER_SERVER" \
+                --data-value git_writer.port="$GIT_WRITER_SERVER_PORT" \
                 --data-value git_writer.repository="$GIT_WRITER_PROJECT/$GIT_WRITER_REPOSITORY.git" \
                 --data-value git_writer.branch="$(cat hack/git_entropy)" \
-                --data-value git_writer.base64_encoded_ssh_key="$(echo "$GIT_WRITER_SSH_TOKEN" | base64)" \
+                --data-value git_writer.base64_encoded_ssh_key="$(echo "$(cat hack/gitea-key)" | base64)" \
                 --data-value git_writer.base64_encoded_known_hosts="$(echo "$GIT_WRITER_SERVER_PUBLIC_TOKEN" | base64)" |
                 kapp deploy --yes -a example-supply -f-
 }
@@ -329,12 +369,15 @@ setup_source_to_gitops() {
 setup_gitops_to_app() {
         log "setting up gitops to app"
 
+        GIT_WRITER_SSH_TOKEN=${GIT_WRITER_SSH_TOKEN:-"$(cat hack/gitea-key)"}
+        GIT_WRITER_SERVER_PUBLIC_TOKEN=${GIT_WRITER_SERVER_PUBLIC_TOKEN:-"$(cat hack/gitea-server-public-key)"}
+
         ytt --ignore-unknown-comments \
                 -f "$DIR/../examples/gitops-to-app" \
                 --data-value git_writer.server="$GIT_WRITER_SERVER" \
                 --data-value git_writer.repository="$GIT_WRITER_PROJECT/$GIT_WRITER_REPOSITORY" \
                 --data-value git_writer.branch="$(cat hack/git_entropy)" \
-                --data-value git_writer.base64_encoded_ssh_key="$(echo "$GIT_WRITER_SSH_TOKEN" | base64)" \
+                --data-value git_writer.base64_encoded_ssh_key="$(echo "$(cat hack/gitea-key)" | base64)" \
                 --data-value git_writer.base64_encoded_known_hosts="$(echo "$GIT_WRITER_SERVER_PUBLIC_TOKEN" | base64)" |
                 kapp deploy --yes -a example-deliver -f-
 }
@@ -356,13 +399,7 @@ test_source_to_gitops() {
         SUCCESS=false
 
         pushd "$(mktemp -d)"
-              ssh-add -t 1000 - <<< "$GIT_WRITER_SSH_TOKEN" 2> /dev/null || {
-                mkdir -p ~/.ssh
-                echo "$GIT_WRITER_SSH_TOKEN" >> ~/.ssh/id_rsa
-                echo "$GIT_WRITER_SERVER_PUBLIC_TOKEN" >> ~/.ssh/known_hosts
-                chmod 600 ~/.ssh/id_rsa
-              }
-              git clone "$GIT_WRITER_SSH_USER@$GIT_WRITER_SERVER:$GIT_WRITER_PROJECT/$GIT_WRITER_REPOSITORY.git"
+              git clone "$GIT_WRITER_SSH_USER@$GIT_WRITER_SERVER:$GIT_WRITER_SERVER_PORT/$GIT_WRITER_PROJECT/$GIT_WRITER_REPOSITORY.git"
               echo "looking for branch $BRANCH"
               pushd "$GIT_WRITER_REPOSITORY"
                     for i in {20..1}; do
@@ -435,13 +472,13 @@ clean_up_git_repo() {
 }
 
 delete_containers() {
-        docker rm -f $REGISTRY_CONTAINER_NAME || true
-        docker rm -f $KUBERNETES_CONTAINER_NAME || true
+#        docker rm -f $REGISTRY_CONTAINER_NAME || true
+#        docker rm -f $KUBERNETES_CONTAINER_NAME || true
         docker-compose -f hack/docker-compose.yaml down -v
 }
 
 delete_generated_repository_keys() {
-        rm hack/gitea-key.pub hack/gitea-key
+        rm hack/gitea-key.pub hack/gitea-key hack/gitea-server-public-key
 }
 
 log() {

@@ -82,7 +82,14 @@ spec:
               export GIT_SSH_VARIANT="$(pipeline.spec.inputs.git_ssh_variant)$"
             fi
             git init
-            git remote add origin $(pipeline.spec.inputs.git_ssh_user)$@$(pipeline.spec.inputs.git_server)$:$(pipeline.spec.inputs.git_repository)$
+            if [[ -n "$(pipeline.spec.inputs.git_server_port)$" ]]; then
+              git remote add origin $(pipeline.spec.inputs.git_ssh_user)$@$(pipeline.spec.inputs.git_server)$:$(pipeline.spec.inputs.git_server_port)$/$(pipeline.spec.inputs.git_repository)$
+            else
+              git remote add origin $(pipeline.spec.inputs.git_ssh_user)$@$(pipeline.spec.inputs.git_server)$:$(pipeline.spec.inputs.git_repository)$
+            fi
+            # TODO remove the fetch and branch
+            git fetch
+            git branch
             git pull origin "`git remote show origin | grep "HEAD branch" | sed 's/.*: //'`"
             git pull origin "$BRANCH" || git branch "$BRANCH"
             git checkout "$BRANCH"

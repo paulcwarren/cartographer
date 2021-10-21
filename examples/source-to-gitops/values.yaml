@@ -27,3 +27,6 @@ git_writer:
   base64_encoded_ssh_key: a-key
   base64_encoded_known_hosts: a-host
   branch: main
+  username: example
+  user_email: example@example.com
+  port: ""
