@@ -61,12 +61,12 @@ main() {
         for command in "$@"; do
                 case $command in
                 cluster)
-#                        start_registry
+                        start_registry
                         start_repository
-#                        start_local_cluster
-#                        install_cert_manager
-#                        install_kapp_controller
-#                        install_secretgen_controller
+                        start_local_cluster
+                        install_cert_manager
+                        install_kapp_controller
+                        install_secretgen_controller
                         ;;
 
                 cartographer)
@@ -269,6 +269,10 @@ containerdConfigPatches:
 nodes:
   - role: control-plane
     image: ${KIND_IMAGE}
+    extraPortMappings:
+    - containerPort: 2222
+      hostPort: 2222
+      protocol: TCP
 EOF
 }
 
@@ -472,8 +476,8 @@ clean_up_git_repo() {
 }
 
 delete_containers() {
-#        docker rm -f $REGISTRY_CONTAINER_NAME || true
-#        docker rm -f $KUBERNETES_CONTAINER_NAME || true
+        docker rm -f $REGISTRY_CONTAINER_NAME || true
+        docker rm -f $KUBERNETES_CONTAINER_NAME || true
         docker-compose -f hack/docker-compose.yaml down -v
 }
 
