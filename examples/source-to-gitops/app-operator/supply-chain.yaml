@@ -26,34 +26,34 @@ spec:
   #     GitRepository               Image                    ConfigMap      <--[configmap]--- Git Commit
   #
   resources:
-    - name: source-provider
-      templateRef:
-        kind: ClusterSourceTemplate
-        name: source
-
-    - name: source-tester
-      templateRef:
-        kind: ClusterSourceTemplate
-        name: tests
-      sources:
-        - resource: source-provider
-          name: source
-
-    - name: image-builder
-      templateRef:
-        kind: ClusterImageTemplate
-        name: image
-      sources:
-        - resource: source-provider
-          name: source-tester
+#    - name: source-provider
+#      templateRef:
+#        kind: ClusterSourceTemplate
+#        name: source
+#
+#    - name: source-tester
+#      templateRef:
+#        kind: ClusterSourceTemplate
+#        name: tests
+#      sources:
+#        - resource: source-provider
+#          name: source
+#
+#    - name: image-builder
+#      templateRef:
+#        kind: ClusterImageTemplate
+#        name: image
+#      sources:
+#        - resource: source-provider
+#          name: source-tester
 
     - name: config-provider
       templateRef:
         kind: ClusterConfigTemplate
-        name: app-config
-      images:
-        - resource: image-builder
-          name: image
+        name: some-config
+#      images:
+#        - resource: image-builder
+#          name: image
 
     - name: git-writer
       templateRef:

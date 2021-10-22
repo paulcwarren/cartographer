@@ -153,6 +153,36 @@ spec:
                 - name: registry-credentials
 
 ---
+apiVersion: carto.run/v1alpha1
+kind: ClusterConfigTemplate
+metadata:
+  name: some-config
+spec:
+  configPath: .data
+
+  template:
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: $(workload.metadata.name)$
+    data:
+      manifest.yaml: |
+        apiVersion: serving.knative.dev/v1
+        kind: Service
+        metadata:
+          name: $(workload.metadata.name)$
+        spec:
+          template:
+            metadata:
+              annotations:
+                autoscaling.knative.dev/minScale: "1"
+            spec:
+              containers:
+                - name: workload
+                  image: data.values.image
+                  securityContext:
+                    runAsUser: 1000
+---
 #
 #
 # `git-writer` takes the ConfigMap and writes it to git.
